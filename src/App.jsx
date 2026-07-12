@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import * as authApi from './api/auth'
 
 const statCards = [
   { label: 'Total Users', value: '12,847', trend: '+12.4% this month', trendColor: 'text-green-600', icon: '👥' },
@@ -44,9 +45,12 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState('')
   const [emailError, setEmailError] = useState('')
   const [passwordError, setPasswordError] = useState('')
+  const [formError, setFormError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    setFormError('')
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     let eErr = ''
     let pErr = ''
@@ -60,8 +64,16 @@ function Login({ onLogin }) {
       setPasswordError(pErr)
       return
     }
-    const name = email.split('@')[0]
-    onLogin(name.charAt(0).toUpperCase() + name.slice(1))
+
+    setSubmitting(true)
+    try {
+      const user = await authApi.login(email.trim(), password)
+      onLogin(user)
+    } catch (err) {
+      setFormError(err.message || 'Login failed')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -73,15 +85,22 @@ function Login({ onLogin }) {
         <h1 className="mb-1 text-[22px] font-semibold text-neutral-900">Welcome back</h1>
         <p className="mb-7 text-sm text-neutral-500">Sign in to continue to your dashboard</p>
 
+        {formError && (
+          <div className="mb-4 rounded-[9px] border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-600">
+            {formError}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
             <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Email</label>
             <input
               type="text"
               value={email}
-              onChange={(e) => { setEmail(e.target.value); setEmailError('') }}
+              onChange={(e) => { setEmail(e.target.value); setEmailError(''); setFormError('') }}
               placeholder="you@example.com"
-              className={`w-full rounded-[9px] border px-3.5 py-2.5 text-sm text-neutral-900 outline-none ${emailError ? 'border-red-600' : 'border-neutral-200'}`}
+              disabled={submitting}
+              className={`w-full rounded-[9px] border px-3.5 py-2.5 text-sm text-neutral-900 outline-none disabled:opacity-60 ${emailError ? 'border-red-600' : 'border-neutral-200'}`}
             />
             {emailError && <p className="mt-1.5 text-xs text-red-600">{emailError}</p>}
           </div>
@@ -90,20 +109,22 @@ function Login({ onLogin }) {
             <input
               type="password"
               value={password}
-              onChange={(e) => { setPassword(e.target.value); setPasswordError('') }}
+              onChange={(e) => { setPassword(e.target.value); setPasswordError(''); setFormError('') }}
               placeholder="••••••••"
-              className={`w-full rounded-[9px] border px-3.5 py-2.5 text-sm text-neutral-900 outline-none ${passwordError ? 'border-red-600' : 'border-neutral-200'}`}
+              disabled={submitting}
+              className={`w-full rounded-[9px] border px-3.5 py-2.5 text-sm text-neutral-900 outline-none disabled:opacity-60 ${passwordError ? 'border-red-600' : 'border-neutral-200'}`}
             />
             {passwordError && <p className="mt-1.5 text-xs text-red-600">{passwordError}</p>}
           </div>
           <button
             type="submit"
-            className="mt-2 w-full cursor-pointer rounded-[9px] bg-neutral-900 py-3 text-sm font-semibold text-white hover:bg-neutral-700"
+            disabled={submitting}
+            className="mt-2 w-full cursor-pointer rounded-[9px] bg-neutral-900 py-3 text-sm font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Sign in
+            {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-        <p className="mt-5 text-center text-xs text-neutral-400">Use any email + password of 6+ characters</p>
+        <p className="mt-5 text-center text-xs text-neutral-400">Use your seeded account, e.g. admin@example.com</p>
       </div>
     </div>
   )
@@ -212,24 +233,54 @@ function Gmail() {
 }
 
 function App() {
-  const [loggedIn, setLoggedIn] = useState(false)
-  const [userName, setUserName] = useState('User')
+  const [user, setUser] = useState(null)
+  const [restoring, setRestoring] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [activePage, setActivePage] = useState('dashboard')
   const [profileOpen, setProfileOpen] = useState(false)
 
-  const userInitial = (userName || 'U').charAt(0).toUpperCase()
-  const userEmail = useMemo(() => `${(userName || 'user').toLowerCase()}@example.com`, [userName])
+  // Restore an existing session from a stored token on first load.
+  useEffect(() => {
+    let active = true
+    async function restore() {
+      if (!authApi.hasToken()) {
+        setRestoring(false)
+        return
+      }
+      try {
+        const current = await authApi.getCurrentUser()
+        if (active) setUser(current)
+      } catch {
+        authApi.logout()
+      } finally {
+        if (active) setRestoring(false)
+      }
+    }
+    restore()
+    return () => { active = false }
+  }, [])
+
+  const userName = user?.name || 'User'
+  const userInitial = userName.charAt(0).toUpperCase()
+  const userEmail = user?.email || ''
 
   const handleLogout = () => {
-    setLoggedIn(false)
-    setUserName('User')
+    authApi.logout()
+    setUser(null)
     setProfileOpen(false)
     setActivePage('dashboard')
   }
 
-  if (!loggedIn) {
-    return <Login onLogin={(name) => { setUserName(name); setLoggedIn(true) }} />
+  if (restoring) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-neutral-50 text-sm text-neutral-400">
+        Loading…
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Login onLogin={(u) => setUser(u)} />
   }
 
   const activeLabel = activePage === 'dashboard' ? 'Dashboard' : 'Gmail'
