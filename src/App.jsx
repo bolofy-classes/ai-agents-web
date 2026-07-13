@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as authApi from './api/auth'
+import * as gmailApi from './api/gmail'
+import EmailList from './components/EmailList'
 
 const statCards = [
   { label: 'Total Users', value: '12,847', trend: '+12.4% this month', trendColor: 'text-green-600', icon: '👥' },
@@ -24,15 +26,6 @@ const transactions = [
   { name: 'Acme Corp', date: 'Jul 10, 2026', status: 'Completed', badge: 'bg-green-100 text-green-600', amount: '$5,600.00' },
   { name: 'Maria Garcia', date: 'Jul 9, 2026', status: 'Failed', badge: 'bg-red-100 text-red-600', amount: '$320.00' },
   { name: 'Tom Baker', date: 'Jul 8, 2026', status: 'Completed', badge: 'bg-green-100 text-green-600', amount: '$2,150.00' },
-]
-
-const emails = [
-  { initial: 'A', from: 'Alex Turner', subject: 'Q3 roadmap review — feedback needed', time: '10:24 AM' },
-  { initial: 'M', from: 'Maya Patel', subject: 'Re: Design handoff for dashboard', time: '9:02 AM' },
-  { initial: 'G', from: 'GitHub', subject: '[repo] 3 new pull requests opened', time: 'Yesterday' },
-  { initial: 'L', from: 'Linda Park', subject: 'Invoice #4021 attached', time: 'Yesterday' },
-  { initial: 'S', from: 'Slack', subject: 'You have 4 unread messages', time: 'Mon' },
-  { initial: 'N', from: 'Nina Rossi', subject: 'Lunch next week?', time: 'Mon' },
 ]
 
 const navDefs = [
@@ -130,7 +123,22 @@ function Login({ onLogin }) {
   )
 }
 
-function Dashboard({ userName }) {
+function Dashboard({ userName, onOpenGmail }) {
+  const [emails, setEmails] = useState([])
+  const [emailsConnected, setEmailsConnected] = useState(false)
+  const [emailsLoading, setEmailsLoading] = useState(true)
+
+  useEffect(() => {
+    gmailApi
+      .getMessages()
+      .then((res) => {
+        setEmailsConnected(res.connected)
+        setEmails((res.messages || []).slice(0, 5))
+      })
+      .catch(() => {})
+      .finally(() => setEmailsLoading(false))
+  }, [])
+
   return (
     <div className="animate-[fadeIn_0.3s_ease]">
       <h1 className="mb-1 text-[22px] font-semibold text-neutral-900">Welcome back, {userName}</h1>
@@ -178,6 +186,29 @@ function Dashboard({ userName }) {
         </div>
       </div>
 
+      {/* Recent Emails (from Gmail AI Agent) */}
+      <div className="mb-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+        <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-[18px]">
+          <span className="text-sm font-semibold text-neutral-900">Recent Emails</span>
+          <button onClick={onOpenGmail} className="text-[13px] font-medium text-neutral-500 hover:text-neutral-900">
+            Open Gmail →
+          </button>
+        </div>
+        {emailsLoading ? (
+          <div className="px-5 py-8 text-center text-[13px] text-neutral-400">Loading…</div>
+        ) : !emailsConnected ? (
+          <div className="px-5 py-8 text-center text-[13px] text-neutral-400">
+            Gmail not connected.{' '}
+            <button onClick={onOpenGmail} className="font-medium text-neutral-700 underline">
+              Connect it
+            </button>{' '}
+            to see your inbox here.
+          </div>
+        ) : (
+          <EmailList messages={emails} compact />
+        )}
+      </div>
+
       <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
         <div className="border-b border-neutral-100 px-5 py-[18px] text-sm font-semibold text-neutral-900">
           Recent Transactions
@@ -210,23 +241,249 @@ function Dashboard({ userName }) {
 }
 
 function Gmail() {
+  const [status, setStatus] = useState(null) // { connected, gmailEmail, lastSyncedAt }
+  const [messages, setMessages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState('')
+  const [syncCount, setSyncCount] = useState(25)
+
+  // AI bulk-cleanup state
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestions, setSuggestions] = useState(null) // null=closed; []=none; [...]=open
+  const [selected, setSelected] = useState(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  const refresh = async () => {
+    try {
+      const [st, msgs] = await Promise.all([gmailApi.getStatus(), gmailApi.getMessages()])
+      setStatus(st)
+      setMessages(msgs.messages || [])
+    } catch (err) {
+      setError(err.message || 'Failed to load Gmail')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    setError('')
+    try {
+      const url = await gmailApi.getAuthUrl()
+      window.location.href = url // redirect to Google consent
+    } catch (err) {
+      setError(err.message || 'Could not start Google sign-in')
+      setConnecting(false)
+    }
+  }
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setError('')
+    try {
+      const res = await gmailApi.sync(syncCount)
+      setMessages(res.messages || [])
+      setStatus((s) => ({ ...s, lastSyncedAt: res.lastSyncedAt }))
+    } catch (err) {
+      setError(err.message || 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    await gmailApi.disconnect()
+    setMessages([])
+    refresh()
+  }
+
+  const updateSummary = (gmailId, summary) =>
+    setMessages((list) => list.map((m) => (m.gmailId === gmailId ? { ...m, summary } : m)))
+
+  const removeEmail = (gmailId) => {
+    setMessages((list) => list.filter((m) => m.gmailId !== gmailId))
+    setSuggestions((sug) => (sug ? sug.filter((s) => s.gmailId !== gmailId) : sug))
+  }
+
+  const handleSuggestCleanup = async () => {
+    setSuggesting(true)
+    setError('')
+    try {
+      const res = await gmailApi.suggestDelete()
+      setSuggestions(res.suggestions)
+      setSelected(new Set(res.suggestions.map((s) => s.gmailId))) // pre-select all
+    } catch (err) {
+      setError(err.message || 'Could not get cleanup suggestions')
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  const toggleSelected = (gmailId) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(gmailId)) next.delete(gmailId)
+      else next.add(gmailId)
+      return next
+    })
+
+  const handleBulkDelete = async () => {
+    const ids = [...selected]
+    if (!ids.length) return
+    setBulkDeleting(true)
+    setError('')
+    try {
+      await gmailApi.trash(ids)
+      setMessages((list) => list.filter((m) => !selected.has(m.gmailId)))
+      setSuggestions(null)
+      setSelected(new Set())
+    } catch (err) {
+      setError(err.message || 'Bulk delete failed')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
+  const lastSynced = status?.lastSyncedAt
+    ? new Date(status.lastSyncedAt).toLocaleString()
+    : null
+
   return (
     <div className="animate-[fadeIn_0.3s_ease]">
-      <h1 className="mb-1 text-[22px] font-semibold text-neutral-900">Gmail</h1>
-      <p className="mb-6 text-sm text-neutral-500">Your inbox, connected.</p>
-      <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-        {emails.map((mail) => (
-          <div key={mail.subject} className="flex items-center gap-3.5 border-b border-neutral-100 px-5 py-4 hover:bg-neutral-50">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[13px] font-semibold text-white">
-              {mail.initial}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold text-neutral-900">{mail.from}</div>
-              <div className="truncate text-[13px] text-neutral-600">{mail.subject}</div>
-            </div>
-            <div className="flex-shrink-0 text-xs text-neutral-400">{mail.time}</div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="mb-1 text-[22px] font-semibold text-neutral-900">Gmail AI Agent</h1>
+          <p className="text-sm text-neutral-500">
+            {status?.connected
+              ? `Connected as ${status.gmailEmail}${lastSynced ? ` · synced ${lastSynced}` : ''}`
+              : 'Connect your inbox to summarize, reply, and auto-schedule meetings.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {status?.connected ? (
+            <>
+              <div className="flex items-stretch overflow-hidden rounded-[9px] bg-neutral-900">
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-60"
+                >
+                  {syncing ? 'Syncing…' : '⟳ Sync'}
+                </button>
+                <select
+                  value={syncCount}
+                  onChange={(e) => setSyncCount(Number(e.target.value))}
+                  disabled={syncing}
+                  title="How many emails to fetch"
+                  className="cursor-pointer border-l border-neutral-700 bg-neutral-900 pl-2 pr-1 text-sm font-medium text-white outline-none disabled:opacity-60"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+              <button
+                onClick={handleSuggestCleanup}
+                disabled={suggesting || !messages.length}
+                className="rounded-[9px] border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-60"
+              >
+                {suggesting ? 'Analyzing…' : '🧹 AI Cleanup'}
+              </button>
+              <button
+                onClick={handleDisconnect}
+                className="rounded-[9px] border border-neutral-200 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="rounded-[9px] bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-60"
+            >
+              {connecting ? 'Redirecting…' : 'Connect Gmail'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-[9px] border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-600">
+          {error}
+        </div>
+      )}
+
+      {/* AI cleanup suggestions panel */}
+      {suggestions !== null && (
+        <div className="mb-4 overflow-hidden rounded-2xl border border-amber-200 bg-amber-50">
+          <div className="flex items-center justify-between border-b border-amber-200 px-5 py-3">
+            <span className="text-sm font-semibold text-neutral-900">
+              🧹 AI suggests deleting {suggestions.length} email{suggestions.length === 1 ? '' : 's'}
+            </span>
+            <button onClick={() => setSuggestions(null)} className="text-[13px] text-neutral-500 hover:text-neutral-900">
+              Dismiss
+            </button>
           </div>
-        ))}
+          {suggestions.length === 0 ? (
+            <div className="px-5 py-6 text-center text-[13px] text-neutral-500">
+              Nothing to clean up — your inbox looks tidy.
+            </div>
+          ) : (
+            <>
+              <div className="max-h-72 overflow-y-auto">
+                {suggestions.map((s) => (
+                  <label
+                    key={s.gmailId}
+                    className="flex cursor-pointer items-start gap-3 border-b border-amber-100 px-5 py-2.5 last:border-b-0 hover:bg-amber-100/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.gmailId)}
+                      onChange={() => toggleSelected(s.gmailId)}
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 accent-neutral-900"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-medium text-neutral-900">{s.subject || '(no subject)'}</div>
+                      <div className="truncate text-[12px] text-neutral-500">{s.from}</div>
+                      <div className="text-[11px] font-medium text-amber-700">Reason: {s.reason}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-amber-200 px-5 py-3">
+                <span className="text-[12px] text-neutral-500">{selected.size} selected</span>
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting || selected.size === 0}
+                  className="rounded-[9px] bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {bulkDeleting ? 'Deleting…' : `🗑 Move ${selected.size} to Trash`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+        {loading ? (
+          <div className="px-5 py-10 text-center text-[13px] text-neutral-400">Loading…</div>
+        ) : !status?.connected ? (
+          <div className="px-5 py-12 text-center">
+            <div className="mb-2 text-3xl">✉️</div>
+            <div className="mb-1 text-sm font-semibold text-neutral-900">Gmail not connected</div>
+            <div className="text-[13px] text-neutral-500">Click “Connect Gmail” to authorize access.</div>
+          </div>
+        ) : (
+          <EmailList messages={messages} onSummary={updateSummary} onRemove={removeEmail} />
+        )}
       </div>
     </div>
   )
@@ -238,6 +495,15 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [activePage, setActivePage] = useState('dashboard')
   const [profileOpen, setProfileOpen] = useState(false)
+
+  // Land on the Gmail page after the OAuth redirect (?gmail=connected|error).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('gmail')) {
+      setActivePage('gmail')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
 
   // Restore an existing session from a stored token on first load.
   useEffect(() => {
@@ -367,7 +633,11 @@ function App() {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-8 pb-10 pt-7">
-          {activePage === 'dashboard' ? <Dashboard userName={userName} /> : <Gmail />}
+          {activePage === 'dashboard' ? (
+            <Dashboard userName={userName} onOpenGmail={() => setActivePage('gmail')} />
+          ) : (
+            <Gmail />
+          )}
         </div>
       </div>
     </div>
