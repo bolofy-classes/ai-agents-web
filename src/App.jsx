@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import * as authApi from './api/auth'
 import * as gmailApi from './api/gmail'
+import * as newsApi from './api/news'
 import EmailList from './components/EmailList'
+import News from './components/News'
+import Weather from './components/Weather'
 
 const statCards = [
   { label: 'Total Users', value: '12,847', trend: '+12.4% this month', trendColor: 'text-green-600', icon: '👥' },
@@ -31,7 +34,19 @@ const transactions = [
 const navDefs = [
   { key: 'dashboard', label: 'Dashboard', icon: '▦' },
   { key: 'gmail', label: 'Gmail', icon: '✉' },
+  { key: 'news', label: 'News', icon: '📰' },
 ]
+
+function timeAgo(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const mins = Math.round((Date.now() - d.getTime()) / 60000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState('')
@@ -123,10 +138,14 @@ function Login({ onLogin }) {
   )
 }
 
-function Dashboard({ userName, onOpenGmail }) {
+function Dashboard({ userName, onOpenGmail, onOpenNews }) {
   const [emails, setEmails] = useState([])
   const [emailsConnected, setEmailsConnected] = useState(false)
   const [emailsLoading, setEmailsLoading] = useState(true)
+
+  const [news, setNews] = useState([])
+  const [newsHasKey, setNewsHasKey] = useState(false)
+  const [newsLoading, setNewsLoading] = useState(true)
 
   useEffect(() => {
     gmailApi
@@ -139,10 +158,86 @@ function Dashboard({ userName, onOpenGmail }) {
       .finally(() => setEmailsLoading(false))
   }, [])
 
+  useEffect(() => {
+    newsApi
+      .getSettings()
+      .then((res) => {
+        setNewsHasKey(res.settings.hasApiKey)
+        if (!res.settings.hasApiKey) return null
+        return newsApi.getNews().then((r) => setNews((r.articles || []).slice(0, 4)))
+      })
+      .catch(() => {})
+      .finally(() => setNewsLoading(false))
+  }, [])
+
   return (
     <div className="animate-[fadeIn_0.3s_ease]">
       <h1 className="mb-1 text-[22px] font-semibold text-neutral-900">Welcome back, {userName}</h1>
-      <p className="mb-7 text-sm text-neutral-500">Here's what's happening with your account today.</p>
+      <p className="mb-6 text-sm text-neutral-500">Here's what's happening with your account today.</p>
+
+      {/* Top row: Recent News (improved) + Weather */}
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+        {/* Recent News */}
+        <div className="flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+          <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-4">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 items-center justify-center">
+                <span className="absolute h-2 w-2 animate-ping rounded-full bg-red-400 opacity-75" />
+                <span className="h-2 w-2 rounded-full bg-red-500" />
+              </span>
+              <span className="text-sm font-semibold text-neutral-900">Recent News</span>
+            </div>
+            <button onClick={onOpenNews} className="text-[13px] font-medium text-neutral-500 hover:text-neutral-900">
+              Open News →
+            </button>
+          </div>
+
+          {newsLoading ? (
+            <div className="flex flex-1 items-center justify-center px-5 py-10 text-center text-[13px] text-neutral-400">Loading…</div>
+          ) : !newsHasKey ? (
+            <div className="flex flex-1 items-center justify-center px-5 py-10 text-center text-[13px] text-neutral-400">
+              <span>
+                No GNews key set.{' '}
+                <button onClick={onOpenNews} className="font-medium text-neutral-700 underline">Add one</button>{' '}
+                to see headlines.
+              </span>
+            </div>
+          ) : news.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center px-5 py-10 text-center text-[13px] text-neutral-400">No news right now.</div>
+          ) : (
+            <div>
+              {news.map((a, i) => (
+                <a
+                  key={a.url}
+                  href={a.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center gap-3.5 border-b border-neutral-100 px-5 py-3.5 last:border-b-0 hover:bg-neutral-50"
+                >
+                  <div className="h-14 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-neutral-100">
+                    {a.image ? (
+                      <img src={a.image} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" onError={(e) => { e.currentTarget.parentElement.style.display = 'none' }} />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-lg">📰</div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-0.5 flex items-center gap-2">
+                      {i === 0 && <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Top</span>}
+                      <span className="truncate text-[11px] font-medium uppercase tracking-wide text-neutral-400">{a.source}</span>
+                    </div>
+                    <div className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-neutral-900 group-hover:text-neutral-700">{a.title}</div>
+                    {a.publishedAt && <div className="mt-0.5 text-[11px] text-neutral-400">{timeAgo(a.publishedAt)}</div>}
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Weather */}
+        <Weather />
+      </div>
 
       <div className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         {statCards.map((card) => (
@@ -549,7 +644,7 @@ function App() {
     return <Login onLogin={(u) => setUser(u)} />
   }
 
-  const activeLabel = activePage === 'dashboard' ? 'Dashboard' : 'Gmail'
+  const activeLabel = navDefs.find((n) => n.key === activePage)?.label || 'Dashboard'
 
   return (
     <div className="flex min-h-screen w-full bg-white">
@@ -633,11 +728,15 @@ function App() {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-8 pb-10 pt-7">
-          {activePage === 'dashboard' ? (
-            <Dashboard userName={userName} onOpenGmail={() => setActivePage('gmail')} />
-          ) : (
-            <Gmail />
+          {activePage === 'dashboard' && (
+            <Dashboard
+              userName={userName}
+              onOpenGmail={() => setActivePage('gmail')}
+              onOpenNews={() => setActivePage('news')}
+            />
           )}
+          {activePage === 'gmail' && <Gmail />}
+          {activePage === 'news' && <News />}
         </div>
       </div>
     </div>
