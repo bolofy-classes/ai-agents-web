@@ -2,16 +2,11 @@ import { useEffect, useState } from 'react'
 import * as authApi from './api/auth'
 import * as gmailApi from './api/gmail'
 import * as newsApi from './api/news'
+import * as socialApi from './api/social'
 import EmailList from './components/EmailList'
 import News from './components/News'
 import Weather from './components/Weather'
-
-const statCards = [
-  { label: 'Total Users', value: '12,847', trend: '+12.4% this month', trendColor: 'text-green-600', icon: '👥' },
-  { label: 'Revenue', value: '$48,290', trend: '+8.1% this month', trendColor: 'text-green-600', icon: '💵' },
-  { label: 'Active Sessions', value: '1,204', trend: '-2.3% this month', trendColor: 'text-red-600', icon: '⚡' },
-  { label: 'Conversion Rate', value: '3.42%', trend: '+0.4% this month', trendColor: 'text-green-600', icon: '📈' },
-]
+import SocialMedia from './components/SocialMedia'
 
 const chartData = [40, 65, 50, 80, 60, 90, 70]
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -23,19 +18,18 @@ const activity = [
   { text: 'Weekly report generated', time: 'Yesterday' },
 ]
 
-const transactions = [
-  { name: 'Sarah Chen', date: 'Jul 12, 2026', status: 'Completed', badge: 'bg-green-100 text-green-600', amount: '$1,240.00' },
-  { name: 'James Wilson', date: 'Jul 11, 2026', status: 'Pending', badge: 'bg-amber-100 text-amber-700', amount: '$890.00' },
-  { name: 'Acme Corp', date: 'Jul 10, 2026', status: 'Completed', badge: 'bg-green-100 text-green-600', amount: '$5,600.00' },
-  { name: 'Maria Garcia', date: 'Jul 9, 2026', status: 'Failed', badge: 'bg-red-100 text-red-600', amount: '$320.00' },
-  { name: 'Tom Baker', date: 'Jul 8, 2026', status: 'Completed', badge: 'bg-green-100 text-green-600', amount: '$2,150.00' },
-]
-
 const navDefs = [
   { key: 'dashboard', label: 'Dashboard', icon: '▦' },
   { key: 'gmail', label: 'Gmail', icon: '✉' },
   { key: 'news', label: 'News', icon: '📰' },
+  { key: 'social', label: 'Social Media', icon: '📣' },
 ]
+
+const platformMeta = {
+  linkedin: { label: 'LinkedIn', icon: '💼', badge: 'bg-blue-100 text-blue-700' },
+  x: { label: 'X', icon: '𝕏', badge: 'bg-neutral-200 text-neutral-800' },
+  instagram: { label: 'Instagram', icon: '📸', badge: 'bg-pink-100 text-pink-700' },
+}
 
 function timeAgo(iso) {
   if (!iso) return ''
@@ -138,7 +132,7 @@ function Login({ onLogin }) {
   )
 }
 
-function Dashboard({ userName, onOpenGmail, onOpenNews }) {
+function Dashboard({ userName, onOpenGmail, onOpenNews, onOpenSocial }) {
   const [emails, setEmails] = useState([])
   const [emailsConnected, setEmailsConnected] = useState(false)
   const [emailsLoading, setEmailsLoading] = useState(true)
@@ -146,6 +140,26 @@ function Dashboard({ userName, onOpenGmail, onOpenNews }) {
   const [news, setNews] = useState([])
   const [newsHasKey, setNewsHasKey] = useState(false)
   const [newsLoading, setNewsLoading] = useState(true)
+
+  const [social, setSocial] = useState(null) // analytics payload
+
+  useEffect(() => {
+    socialApi
+      .getAnalytics()
+      .then((res) => setSocial(res))
+      .catch(() => {})
+  }, [])
+
+  const socialCards = [
+    { label: 'Posts Published', value: social ? social.totals.postedCount : '—', icon: '🚀' },
+    { label: 'Total Likes', value: social ? social.totals.totalLikes : '—', icon: '❤️' },
+    { label: 'Drafts', value: social ? social.totals.draftCount : '—', icon: '📝' },
+    {
+      label: 'LinkedIn',
+      value: social ? (social.linkedinConnected ? 'Connected' : 'Not connected') : '—',
+      icon: '💼',
+    },
+  ]
 
   useEffect(() => {
     gmailApi
@@ -239,15 +253,20 @@ function Dashboard({ userName, onOpenGmail, onOpenNews }) {
         <Weather />
       </div>
 
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-semibold text-neutral-900">Social Media Analytics</span>
+        <button onClick={onOpenSocial} className="text-[13px] font-medium text-neutral-500 hover:text-neutral-900">
+          Open Social Media →
+        </button>
+      </div>
       <div className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-        {statCards.map((card) => (
+        {socialCards.map((card) => (
           <div key={card.label} className="rounded-2xl border border-neutral-200 bg-white p-5">
             <div className="mb-3.5 flex items-center justify-between">
               <span className="text-[13px] font-medium text-neutral-500">{card.label}</span>
               <span className="text-base">{card.icon}</span>
             </div>
-            <div className="mb-1.5 text-[26px] font-bold text-neutral-900">{card.value}</div>
-            <div className={`text-xs font-medium ${card.trendColor}`}>{card.trend}</div>
+            <div className="text-[26px] font-bold text-neutral-900">{card.value}</div>
           </div>
         ))}
       </div>
@@ -305,31 +324,56 @@ function Dashboard({ userName, onOpenGmail, onOpenNews }) {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-        <div className="border-b border-neutral-100 px-5 py-[18px] text-sm font-semibold text-neutral-900">
-          Recent Transactions
+        <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-[18px]">
+          <span className="text-sm font-semibold text-neutral-900">Recent Posts</span>
+          <button onClick={onOpenSocial} className="text-[13px] font-medium text-neutral-500 hover:text-neutral-900">
+            Open Social Media →
+          </button>
         </div>
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-neutral-50">
-              {['Name', 'Date', 'Status'].map((h) => (
-                <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
-              ))}
-              <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-neutral-500">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((tx) => (
-              <tr key={tx.name} className="border-t border-neutral-100">
-                <td className="px-5 py-3.5 text-[13px] font-medium text-neutral-900">{tx.name}</td>
-                <td className="px-5 py-3.5 text-[13px] text-neutral-500">{tx.date}</td>
-                <td className="px-5 py-3.5">
-                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${tx.badge}`}>{tx.status}</span>
-                </td>
-                <td className="px-5 py-3.5 text-right text-[13px] font-semibold text-neutral-900">{tx.amount}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {!social ? (
+          <div className="px-5 py-8 text-center text-[13px] text-neutral-400">Loading…</div>
+        ) : social.recent.length === 0 ? (
+          <div className="px-5 py-8 text-center text-[13px] text-neutral-400">
+            No published posts yet.{' '}
+            <button onClick={onOpenSocial} className="font-medium text-neutral-700 underline">
+              Create one
+            </button>
+            .
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-neutral-50">
+                  {['Platform', 'Content', 'Likes', 'Post URL'].map((h) => (
+                    <th key={h} className="whitespace-nowrap px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {social.recent.map((p) => {
+                  const meta = platformMeta[p.platform] || { label: p.platform, icon: '📣', badge: 'bg-neutral-100 text-neutral-600' }
+                  return (
+                    <tr key={p._id} className="border-t border-neutral-100">
+                      <td className="px-5 py-3.5">
+                        <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${meta.badge}`}>{meta.icon} {meta.label}</span>
+                      </td>
+                      <td className="max-w-[320px] px-5 py-3.5 text-[13px] text-neutral-700"><div className="line-clamp-1">{p.content}</div></td>
+                      <td className="px-5 py-3.5 text-[13px] font-semibold text-neutral-900">{p.likes}</td>
+                      <td className="max-w-[200px] px-5 py-3.5 text-[13px]">
+                        {p.postUrl ? (
+                          <a href={p.postUrl} target="_blank" rel="noreferrer" className="block truncate text-blue-600 hover:underline" title={p.postUrl}>{p.postUrl}</a>
+                        ) : (
+                          <span className="text-neutral-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -597,6 +641,9 @@ function App() {
     if (params.has('gmail')) {
       setActivePage('gmail')
       window.history.replaceState({}, '', window.location.pathname)
+    } else if (params.has('linkedin')) {
+      setActivePage('social')
+      window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
 
@@ -733,10 +780,12 @@ function App() {
               userName={userName}
               onOpenGmail={() => setActivePage('gmail')}
               onOpenNews={() => setActivePage('news')}
+              onOpenSocial={() => setActivePage('social')}
             />
           )}
           {activePage === 'gmail' && <Gmail />}
           {activePage === 'news' && <News />}
+          {activePage === 'social' && <SocialMedia />}
         </div>
       </div>
     </div>
