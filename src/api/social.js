@@ -55,3 +55,12 @@ export function refreshMetrics(id) {
 export function getAnalytics() {
   return apiFetch('/social/analytics').then((r) => r.data)
 }
+
+// --- Auto-posting schedule (cron) ---
+export function getSchedule() {
+  return apiFetch('/social/schedule').then((r) => r.data.schedule)
+}
+
+export function updateSchedule(body) {
+  return apiFetch('/social/schedule', { method: 'PUT', body }).then((r) => r.data.schedule)
+}

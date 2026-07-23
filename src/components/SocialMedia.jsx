@@ -1,16 +1,199 @@
 import { useEffect, useState } from 'react'
 import * as socialApi from '../api/social'
 
-const PLATFORMS = {
+export const PLATFORMS = {
   linkedin: { label: 'LinkedIn', icon: '💼', badge: 'bg-blue-100 text-blue-700', limit: 3000 },
   x: { label: 'X', icon: '𝕏', badge: 'bg-neutral-200 text-neutral-800', limit: 280 },
   instagram: { label: 'Instagram', icon: '📸', badge: 'bg-pink-100 text-pink-700', limit: 2200 },
 }
-const PLATFORM_KEYS = ['linkedin', 'x', 'instagram']
+export const PLATFORM_KEYS = ['linkedin', 'x', 'instagram']
 
 function StatusBadge({ status }) {
   const cls = status === 'posted' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
   return <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>{status}</span>
+}
+
+const CRON_PRESETS = [
+  { label: 'Daily at 9:00 AM', value: '0 9 * * *' },
+  { label: 'Every 6 hours', value: '0 */6 * * *' },
+  { label: 'Every hour', value: '0 * * * *' },
+]
+
+function ScheduleSection() {
+  const [schedule, setSchedule] = useState(null) // last-saved copy, for the "last run" readout
+  const [form, setForm] = useState(null) // editable draft
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    socialApi
+      .getSchedule()
+      .then((s) => {
+        setSchedule(s)
+        setForm(s)
+      })
+      .catch((err) => setError(err.message || 'Could not load schedule'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const updated = await socialApi.updateSchedule({
+        enabled: form.enabled,
+        cron: form.cron,
+        platform: form.platform,
+        topic: form.topic,
+        footer: form.footer,
+        autoPublish: form.autoPublish,
+      })
+      setSchedule(updated)
+      setForm(updated)
+      setNotice('Schedule saved')
+      setTimeout(() => setNotice(''), 3000)
+    } catch (err) {
+      setError(err.message || 'Could not save schedule')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading || !form) {
+    return (
+      <div className="mb-6 rounded-2xl border border-neutral-200 bg-white p-5 text-[13px] text-neutral-400">
+        Loading schedule…
+      </div>
+    )
+  }
+
+  const isPreset = CRON_PRESETS.some((p) => p.value === form.cron)
+  const presetKey = isPreset ? form.cron : 'custom'
+
+  return (
+    <div className="mb-6 rounded-2xl border border-neutral-200 bg-white p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-neutral-900">⏰ Auto-posting schedule (cron job)</div>
+          <p className="text-[12px] text-neutral-500">
+            On a recurring schedule, generate a post and{' '}
+            {form.platform === 'linkedin' && form.autoPublish ? 'publish it automatically' : 'save it as a draft to review'}.
+          </p>
+        </div>
+        <label className="flex flex-shrink-0 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
+            className="h-4 w-4 accent-neutral-900"
+          />
+          <span className="text-[13px] font-medium text-neutral-700">{form.enabled ? 'Enabled' : 'Disabled'}</span>
+        </label>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Frequency</label>
+          <select
+            value={presetKey}
+            onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value === 'custom' ? f.cron : e.target.value }))}
+            className="w-full rounded-[9px] border border-neutral-200 px-3.5 py-2.5 text-sm text-neutral-900 outline-none focus:border-neutral-400"
+          >
+            {CRON_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+            <option value="custom">Custom cron expression</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Platform</label>
+          <select
+            value={form.platform}
+            onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value }))}
+            className="w-full rounded-[9px] border border-neutral-200 px-3.5 py-2.5 text-sm text-neutral-900 outline-none focus:border-neutral-400"
+          >
+            {PLATFORM_KEYS.map((k) => (
+              <option key={k} value={k}>{PLATFORMS[k].label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {presetKey === 'custom' && (
+        <div className="mt-3">
+          <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Cron expression</label>
+          <input
+            value={form.cron}
+            onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
+            placeholder="0 9 * * *"
+            className="w-full rounded-[9px] border border-neutral-200 px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-neutral-400"
+          />
+          <p className="mt-1 text-[11px] text-neutral-400">
+            Standard 5-field cron syntax (minute hour day month weekday), evaluated in the server's timezone.
+          </p>
+        </div>
+      )}
+
+      <div className="mt-3">
+        <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Topic (optional)</label>
+        <input
+          value={form.topic}
+          onChange={(e) => setForm((f) => ({ ...f, topic: e.target.value }))}
+          placeholder="Leave blank to auto-post about today's top news headline"
+          className="w-full rounded-[9px] border border-neutral-200 px-3.5 py-2.5 text-sm text-neutral-900 outline-none focus:border-neutral-400"
+        />
+      </div>
+
+      <div className="mt-3">
+        <label className="mb-1.5 block text-[13px] font-medium text-neutral-800">Footer (optional)</label>
+        <textarea
+          value={form.footer || ''}
+          onChange={(e) => setForm((f) => ({ ...f, footer: e.target.value }))}
+          rows={2}
+          placeholder="e.g. Disclaimer, sign-off, or CTA — inserted above the hashtags on every post"
+          className="w-full resize-y rounded-[9px] border border-neutral-200 px-3.5 py-2.5 text-sm text-neutral-900 outline-none focus:border-neutral-400"
+        />
+        <p className="mt-1 text-[11px] text-neutral-400">
+          Automatically inserted just above the hashtags on every generated post — scheduled and manual alike.
+        </p>
+      </div>
+
+      {form.platform === 'linkedin' && (
+        <label className="mt-3 flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={form.autoPublish}
+            onChange={(e) => setForm((f) => ({ ...f, autoPublish: e.target.checked }))}
+            className="h-4 w-4 accent-neutral-900"
+          />
+          <span className="text-[13px] text-neutral-700">
+            Auto-publish to LinkedIn (requires LinkedIn connected) — otherwise saved as a draft
+          </span>
+        </label>
+      )}
+
+      {schedule?.lastRunAt && (
+        <div className="mt-3 rounded-[9px] bg-neutral-50 px-3.5 py-2.5 text-[12px] text-neutral-500">
+          Last run {new Date(schedule.lastRunAt).toLocaleString()} — {schedule.lastResult}
+        </div>
+      )}
+
+      {error && <div className="mt-3 text-[12px] text-red-600">{error}</div>}
+      {notice && <div className="mt-3 text-[12px] text-green-600">{notice}</div>}
+
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-[9px] bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-700 disabled:opacity-60"
+        >
+          {saving ? 'Saving…' : 'Save schedule'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function SocialMedia() {
@@ -231,6 +414,8 @@ export default function SocialMedia() {
           {notice}
         </div>
       )}
+
+      <ScheduleSection />
 
       {/* Composer */}
       <div className="mb-6 rounded-2xl border border-neutral-200 bg-white p-5">
