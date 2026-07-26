@@ -7,6 +7,7 @@ import EmailList from './components/EmailList'
 import News from './components/News'
 import Weather from './components/Weather'
 import SocialMedia from './components/SocialMedia'
+import MemeGenerator from './components/MemeGenerator'
 
 const chartData = [40, 65, 50, 80, 60, 90, 70]
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -23,6 +24,7 @@ const navDefs = [
   { key: 'gmail', label: 'Gmail', icon: '✉' },
   { key: 'news', label: 'News', icon: '📰' },
   { key: 'social', label: 'Social Media', icon: '📣' },
+  { key: 'memes', label: 'Memes Generator', icon: '😂' },
 ]
 
 const platformMeta = {
@@ -786,6 +788,7 @@ function App() {
           {activePage === 'gmail' && <Gmail />}
           {activePage === 'news' && <News />}
           {activePage === 'social' && <SocialMedia />}
+          {activePage === 'memes' && <MemeGenerator />}
         </div>
       </div>
     </div>
